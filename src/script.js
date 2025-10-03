@@ -1,12 +1,23 @@
 var Example = Example || {};
 
 Example.timescale = function() {
+    try {
+        if (typeof MatterWrap !== 'undefined') {
+            Matter.use('matter-wrap');
+        } else {
+            Matter.use(require('matter-wrap'));
+        }
+    } catch (e) {
+        // could not require the plugin or install needed
+    }
+
     var Engine = Matter.Engine,
         Render = Matter.Render,
         Runner = Matter.Runner,
         Body = Matter.Body,
         Events = Matter.Events,
         Composite = Matter.Composite,
+        Composites = Matter.Composites,
         Common = Matter.Common,
         MouseConstraint = Matter.MouseConstraint,
         Mouse = Matter.Mouse,
@@ -73,6 +84,8 @@ Example.timescale = function() {
         })
     ]);
 
+    // Ball pool physics will be applied to typed letters only
+
     var bodyOptions = {
         frictionAir: 0.005,
         friction: 0.001,
@@ -96,7 +109,7 @@ Example.timescale = function() {
 
             if (!body.isStatic) {
                 // scale force for mass and time applied
-                var forceMagnitude = (0.02 * body.mass) * timeScale; // Gentler force
+                var forceMagnitude = (0.02 * body.mass) * timeScale;
 
                 var wordIndex = wordBodies.indexOf(body);
                 if (wordIndex !== -1 || body.position.y >= height - 100) {
@@ -133,6 +146,9 @@ Example.timescale = function() {
                 timeScaleTarget = 0.05;
             }
 
+            // create some random forces
+            explosion(engine, event.delta);
+
             // update last time
             lastTime = Common.now();
         }
@@ -163,28 +179,27 @@ Example.timescale = function() {
         var key = e.key.toUpperCase();
         if (e.key === ' ') {
             // Handle space: advance position without adding body
-            currentX += charWidth * 1.5; // Larger gap for space
+            currentX += charWidth * 1.5;
             if (currentX > width - 50) {
-                currentX = width * 0.1; // Wrap to left if reaches end
+                currentX = width * 0.1;
             }
-            e.preventDefault(); // Prevent default space behavior
+            e.preventDefault();
             return;
         }
         if (e.key === 'Backspace') {
             if (wordBodies.length > 0) {
                 var lastBody = wordBodies.pop();
-                // Make it balloon: set zero gravity, negative force upward, and remove when off-screen
                 lastBody.gravityScale = 0;
                 Body.applyForce(lastBody, lastBody.position, {
                     x: 0,
-                    y: -0.005 * lastBody.mass // Upward force
+                    y: -0.005 * lastBody.mass
                 });
                 Body.setVelocity(lastBody, {
                     x: lastBody.velocity.x + Common.random(-1, 1),
-                    y: lastBody.velocity.y - 10 // Strong upward boost
+                    y: lastBody.velocity.y - 10
                 });
-                lastBody.frictionAir = 0.01; // Gentle air resistance for floating
-                lastBody.render.fillStyle = '#000'; // Change color when ballooning
+                lastBody.frictionAir = 0.01;
+                lastBody.render.fillStyle = '#000';
             }
             e.preventDefault();
             return;
@@ -192,22 +207,21 @@ Example.timescale = function() {
         if (letters.includes(key)) {
             var body = Bodies.rectangle(currentX, height * 0.3, charWidth * 0.7, charWidth * 1.1, bodyOptions);
             body.label = key;
-            body.gravityScale = 1; // Normal gravity
+            body.gravityScale = 1;
             
-            // Random color for each letter
             var colors = ['#000', '#000', '#000', '#000', '#000'];
             body.render.fillStyle = colors[Math.floor(Math.random() * colors.length)];
             
             Composite.add(world, body);
             wordBodies.push(body);
-            currentX += charWidth + 10; // Increment position for next letter
+            currentX += charWidth + 10;
             if (currentX > width - 50) {
-                currentX = width * 0.1; // Wrap to left if reaches end
+                currentX = width * 0.1;
             }
         }
     });
 
-    // Draw letters on the bodies and placeholder
+    // Draw letters on the bodies
     Events.on(render, 'afterRender', function() {
         var ctx = render.context;
         var bodies = Composite.allBodies(engine.world);
@@ -221,7 +235,7 @@ Example.timescale = function() {
                 if (body.label.length > 1) {
                     ctx.font = `bold ${Math.min(width * 0.1, 120)}px Arial`;
                 } else {
-                    ctx.font = `bold ${Math.min(width * 0.09, 110)}px Arial`; // Bigger font for single chars
+                    ctx.font = `bold ${Math.min(width * 0.09, 110)}px Arial`;
                 }
                 ctx.fillStyle = 'white';
                 ctx.textAlign = 'center';
@@ -232,11 +246,11 @@ Example.timescale = function() {
         }
     });
 
-    // add mouse control
+    // add mouse control (with ballPool stiffness)
     var mouseConstraint = MouseConstraint.create(engine, {
         mouse: mouse,
         constraint: {
-            stiffness: 1,
+            stiffness: 0.2, // Ball pool stiffness value
             render: {
                 visible: false
             }
@@ -254,6 +268,18 @@ Example.timescale = function() {
         max: { x: width, y: height }
     });
 
+    // wrapping using matter-wrap plugin
+    var allBodies = Composite.allBodies(world);
+
+    for (var i = 0; i < allBodies.length; i += 1) {
+        if (!allBodies[i].isStatic) {
+            allBodies[i].plugin.wrap = {
+                min: { x: render.bounds.min.x - 100, y: render.bounds.min.y },
+                max: { x: render.bounds.max.x + 100, y: render.bounds.max.y }
+            };
+        }
+    }
+
     // Handle resize
     window.addEventListener('resize', function() {
         width = window.innerWidth;
@@ -267,6 +293,7 @@ Example.timescale = function() {
             min: { x: 0, y: 0 },
             max: { x: width, y: height }
         });
+        
         // Update walls
         var walls = [
             Bodies.rectangle(width / 2, 0, width, 50, { 
@@ -286,17 +313,15 @@ Example.timescale = function() {
                 render: { fillStyle: '#000' }
             })
         ];
-        // Remove old walls
+        
         var oldBodies = Composite.allBodies(world).filter(b => b.isStatic && (b.position.y === 0 || b.position.y === height || b.position.x === 0 || b.position.x === width));
         for (var w = 0; w < oldBodies.length; w++) {
             Composite.remove(world, oldBodies[w]);
         }
         Composite.add(world, walls);
-        // Reset currentX for new letters
         currentX = width * 0.1;
     });
 
-    // context for MatterTools.Demo
     return {
         engine: engine,
         runner: runner,
@@ -309,7 +334,7 @@ Example.timescale = function() {
     };
 };
 
-Example.timescale.title = 'Physics Playground';
+Example.timescale.title = 'Physics Playground with Ball Pool';
 Example.timescale.for = '>=0.14.2';
 
 if (typeof module !== 'undefined') {
